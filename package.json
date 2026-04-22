@@ -1,7 +1,25 @@
 {
+  "name": "equidex-userbot",
+  "version": "2.0.0",
+  "description": "EquiDex UserBot - Modular Telegram UserBot",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "dev": "node main.js"
+  },
   "dependencies": {
-    "telegram": "^2.15.3",
-    "youtube-dl-exec": "^2.1.5",
-    "@vitalets/google-translate-api": "^9.0.0"
-  }
+    "dotenv": "^17.4.2",
+    "input": "^1.0.1",
+    "telegram": "^2.22.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "telegram",
+    "userbot",
+    "bot"
+  ],
+  "author": "EquiDex",
+  "license": "MIT"
 }

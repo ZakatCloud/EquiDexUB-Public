@@ -1,112 +1,100 @@
+const https = require('https');
+
 class TranslateModule {
   constructor(client, bot) {
     this.client = client;
     this.bot = bot;
     this.name = 'translate';
-    this.translator = null;
-    this.initTranslator();
   }
 
-  async initTranslator() {
-    try {
-      const { translate } = await import('@vitalets/google-translate-api');
-      this.translator = translate;
-      console.log('✅ Переводчик Google Translate загружен');
-    } catch (error) {
-      console.log('⚠️ Google Translate не доступен');
+  getCommands() { return ['translate', 'перевод', 'переведи']; }
+
+  handleMessage(msg, text) {
+    const cmd = text.toLowerCase().trim();
+    
+    if (cmd.startsWith('перевод ') || cmd.startsWith('переведи ') || cmd.startsWith('translate ')) {
+      const content = text.replace(/^(перевод |переведи |translate )/, '');
+      this.translate(msg, content);
+      return true;
     }
-  }
 
-  getCommands() {
-    return ['перевести', 'translate', 'tr'];
-  }
-
-  async handleMessage(msg, text) {
-    if (text.startsWith('перевести ') || text.startsWith('translate ') || text.startsWith('tr ')) {
-      console.log('🎯 ТРИГГЕР "ПЕРЕВЕСТИ" СРАБОТАЛ!');
-      await this.translateAndEdit(msg);
+    if (cmd === 'перевод' || cmd === 'translate') {
+      this.showHelp(msg);
       return true;
     }
 
     return false;
   }
 
-  async translateAndEdit(msg) {
+  async showHelp(msg) {
+    const helpText = `🌐 **Переводчик**
+
+Использование:
+• \`перевод текст\` - перевести на английский
+• \`перевод ru:en текст\` - с русского на английский
+
+Языки: en, ru, uk, es, fr, de, it, ja, zh`;
+    
+    await this.client.sendMessage(msg.chatId, { 
+      message: helpText, 
+      parseMode: 'markdown', 
+      replyTo: msg.id 
+    });
+  }
+
+  async translate(msg, content) {
+    const loading = await this.client.sendMessage(msg.chatId, {
+      message: '🌐 Перевожу...',
+      replyTo: msg.id
+    });
+
+    let fromLang = 'auto';
+    let toLang = 'en';
+    let text = content;
+
+    const langMatch = content.match(/^([a-z]{2}):([a-z]{2})\s+(.+)$/);
+    if (langMatch) {
+      fromLang = langMatch[1];
+      toLang = langMatch[2];
+      text = langMatch[3];
+    }
+
     try {
-      const text = msg.text;
+      const translated = await this.doTranslate(text, fromLang, toLang);
       
-      let textToTranslate = '';
-      if (text.startsWith('перевести ')) {
-        textToTranslate = text.substring('перевести '.length);
-      } else if (text.startsWith('translate ')) {
-        textToTranslate = text.substring('translate '.length);
-      } else if (text.startsWith('tr ')) {
-        textToTranslate = text.substring('tr '.length);
-      }
-
-      if (!textToTranslate.trim()) {
-        await this.client.sendMessage(msg.chatId, {
-          message: '❌ Укажите текст для перевода\nПример: перевести привет как дела?',
-          replyTo: msg.id
-        });
-        return;
-      }
-
-      console.log('🔤 Перевод текста: ' + textToTranslate);
-
-      if (!this.translator) {
-        await this.initTranslator();
-        if (!this.translator) {
-          await this.fallbackTranslateAndEdit(msg, textToTranslate);
-          return;
-        }
-      }
-
-      const result = await this.translator(textToTranslate, { to: 'en' });
-      
-      await this.client.editMessage(msg.chatId, {
-        message: msg.id,
-        text: `🔤 ${result.text}`
+      await loading.edit({
+        text: `🌐 **Перевод** (${fromLang} → ${toLang}):\n\n${translated}`,
+        parseMode: 'markdown'
       });
-
-      console.log('✅ Сообщение отредактировано на перевод: ' + result.text);
-
     } catch (error) {
-      console.log('❌ Ошибка перевода:', error.message);
-      
-      await this.fallbackTranslateAndEdit(msg, textToTranslate);
+      await loading.edit({
+        text: '❌ Ошибка перевода: ' + error.message
+      });
     }
   }
 
-  async fallbackTranslateAndEdit(msg, textToTranslate) {
-    try {
-      console.log('🔄 Пробуем альтернативный метод перевода...');
+  async doTranslate(text, from, to) {
+    return new Promise((resolve, reject) => {
+      const encodedText = encodeURIComponent(text);
+      const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=${from}|${to}`;
       
-      const response = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=ru|en`);
-      const data = await response.json();
-      
-      if (data.responseStatus === 200 && data.responseData) {
-        const translation = data.responseData.translatedText;
-        
-        await this.client.editMessage(msg.chatId, {
-          message: msg.id,
-          text: `🔤 ${translation}`
+      https.get(url, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const result = JSON.parse(data);
+            if (result.responseStatus === 200 && result.responseData) {
+              resolve(result.responseData.translatedText);
+            } else {
+              reject(new Error('Translation failed'));
+            }
+          } catch {
+            reject(new Error('Parse error'));
+          }
         });
-
-        console.log('✅ Сообщение отредактировано (fallback): ' + translation);
-        
-      } else {
-        throw new Error('API translation failed');
-      }
-      
-    } catch (fallbackError) {
-      console.log('❌ Альтернативный перевод также не сработал');
-      
-      await this.client.sendMessage(msg.chatId, {
-        message: '❌ Ошибка перевода. Установите зависимости:\n`npm install @vitalets/google-translate-api`',
-        replyTo: msg.id
-      });
-    }
+      }).on('error', reject);
+    });
   }
 }
 

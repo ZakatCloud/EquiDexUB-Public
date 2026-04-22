@@ -1,37 +1,161 @@
-# 🚀 Юзербот от Закатика
-<p align="center">
-  <img src="https://img.shields.io/badge/Node.js-v18+-339933?style=for-the-badge&logo=nodedotjs" />
-  <img src="https://img.shields.io/badge/Telethon-Official-blue?style=for-the-badge&logo=telegram" />
-  <img src="https://img.shields.io/badge/Architecture-Modular-red?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/License-MIT-000000?style=for-the-badge" />
-</p>
+# EquiDex UserBot
 
-## 💥 Проект
+Модульный Telegram UserBot с расширенным функционалом.
 
-**ZakatUserbot** — это высокопроизводительный, модульный UserBot для Telegram, созданный на базе **Node.js**.
+## Возможности
 
-Он разработан для максимальной гибкости и расширения. Благодаря динамической системе загрузки, Вы можете добавлять новые модули, не перезапуская ядро, что не является чем-то новым.
+- 📦 Модульная система - добавляй команды без перезагрузки
+- 🔄 Автозагрузка модулей
+- ⚡ Rate limiting
+- 🎯 Graceful shutdown
+- 📊 Статистика использования
 
-## 🌟 Базовые Возможности
-
-* **Динамическая Модульность:** Автоматическая загрузка `.js` файлов из папки `modules/`.
-* **Горячая Перезагрузка:** Перезагрузка отдельных модулей или всего ядра на лету без остановки работы ядра.
-* **Приватность:** Команды принимаются **только** от владельца бота (`owner_id`).
-* **Фановые предустановки:** Включает фановые симуляторы хакинга, RP-команды, системные утилиты и многое другое.
-
-## 🛠️ Установка и Запуск
-
-Для работы требуется установленный **Node.js (v18+)**.
-
-### 1. Клонирование репозитория, установка зависимостей и запуск
+## Установка
 
 ```bash
-root # git clone https://github.com/ZakatCloud/ZakatUserbot-Public
-root # cd ZakatUserbot-Public
-root # npm install
-root # node main.js
+# Клонировать репозиторий
+git clone https://github.com/your-repo/equidex-userbot.git
+cd equidex-userbot
+
+# Установить зависимости
+npm install
+
+# Настроить
+cp .env.example .env
+# Отредактируй .env - добавь API_ID и API_HASH от my.telegram.org
+
+# Запустить
+npm start
 ```
 
-### 2. Настройка для работы юзербота
+## Конфигурация
 
-**Не забудьте установить API_HASH и API_ID в конфиг main.js. При первом запуске у вас запросит номер телефона, код и 2FA при наличии - это нормально, весь код полностью открыт.**
+Создай файл `.env`:
+```
+API_ID=your_api_id
+API_HASH=your_api_hash
+```
+
+Получить API credentials: https://my.telegram.org
+
+## Команды
+
+### Системные
+- `help` / `помощь` - показать все команды
+- `modules` - список модулей
+- `stats` - статистика
+- `reload [имя]` - перезагрузить модуль
+- `settings` - настройки
+
+### Утилиты
+- `ping` / `пинг` - проверить бота
+- `калькулятор 2+2` - вычисления
+- `translate текст` - перевод
+- `short ссылка` - сократить ссылку
+- `время` / `time` - текущее время
+- `whois домен` - информация о домене
+- `погода город` - погода
+
+### Заметки и напоминания
+- `заметка имя: текст` - сохранить заметку
+- `посмотреть имя` - прочитать заметку
+- `notes` / `заметки` - список заметок
+- `напомни текст через 10 мин` - напоминание
+- `таймер 30 сек` - таймер
+
+### Прочее
+- `пароль` - сгенерировать пароль
+- `профиль` - ваш профиль
+
+## Развлечения
+
+- `шутка` / `анекдот` - случайная шутка
+- `факт` - интересный факт
+- `8ball` / `шар` - магический шар
+- `fortune` / `судьба` - предсказание судьбы
+- `xkcd` - случайный комикс
+- `compliment` - комплимент
+- `dare` - правда или действие
+- `quote` / `цитата` - вдохновляющие цитаты
+
+## Создание модулей
+
+```javascript
+class MyModule {
+  constructor(client, bot) {
+    this.client = client;
+    this.bot = bot;
+    this.name = 'mymodule';
+  }
+
+  getCommands() {
+    return ['моякоманда'];
+  }
+
+  async handleMessage(msg, text) {
+    if (text.includes('моякоманда')) {
+      await this.client.sendMessage(msg.chatId, {
+        message: 'Привет!',
+        replyTo: msg.id
+      });
+      return true;
+    }
+    return false;
+  }
+}
+
+module.exports = MyModule;
+```
+
+## Структура проекта
+
+```
+equidex-userbot/
+├── main.js          # Основной файл
+├── modules/         # Модули (23 штуки)
+│   ├── ping.js
+│   ├── help.js
+│   ├── stats.js
+│   └── ...
+├── settings.json    # Настройки
+├── notes.json       # Заметки
+├── .env             # Конфигурация
+└── session.txt      # Сессия Telegram
+```
+
+## Модули (23)
+
+### Системные
+- `base` - базовые команды
+- `ping` - проверка бота
+- `help` - меню помощи
+- `stats` - статистика
+- `settings` - настройки
+
+### Утилиты
+- `calculator` - калькулятор
+- `translate` - переводчик
+- `shortlink` - сокращатель ссылок
+- `time` - время и дата
+- `whois` - информация о домене
+- `send` - рассылка
+
+### Полезное
+- `notes` - заметки
+- `reminds` - напоминания
+- `profile` - профиль
+- `pdf` - PDF инструменты
+
+### Развлечения
+- `8ball` - магический шар
+- `rip` - шутка "умри"
+- `insult` - оскорбления
+- `compliment` - комплименты
+- `dare` - правда или действие
+- `urban` - цитаты
+- `xkcd` - комиксы
+- `fortune` - предсказания
+
+## Лицензия
+
+MIT

@@ -1,27 +1,44 @@
+require('dotenv').config();
 const { TelegramClient } = require('telegram');
-const { StringSession } = require('telegram/sessions');
+const { StringSession } =require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
-const readline = require('readline');
+const input = require('input');
 const fs = require('fs');
 const path = require('path');
 
+const BOT_NAME = 'EquiDex UserBot';
+const VERSION = '2.0.0';
 
-class ModularUserBot {
+class EquiDexBot {
   constructor() {
     this.client = null;
-    this.apiId = 0000000;
-    this.apiHash = '000000000000000000000000000';
+    this.apiId = process.env.API_ID ? parseInt(process.env.API_ID) : 0;
+    this.apiHash = process.env.API_HASH || '';
     this.modules = new Map();
     this.modulesDir = path.join(__dirname, 'modules');
     this.loadedModules = new Set();
     this.botUserId = null;
+    this.commandStats = new Map();
+    this.rateLimits = new Map();
+    this.startTime = Date.now();
+    this.logger = {
+      info: (...args) => console.log(`[${new Date().toISOString()}] ℹ️`, ...args),
+      error: (...args) => console.error(`[${new Date().toISOString()}] ❌`, ...args),
+      warn: (...args) => console.warn(`[${new Date().toISOString()}] ⚠️`, ...args)
+    };
   }
 
   async initialize() {
+    this.logger.info(`${BOT_NAME} v${VERSION} initializing...`);
+    
+    if (!this.apiId || !this.apiHash) {
+      this.logger.error('API_ID and API_HASH required in .env');
+      process.exit(1);
+    }
+
     if (fs.existsSync('./session.txt') && fs.readFileSync('./session.txt', 'utf8').trim() !== '') {
       await this.connectWithSession();
     } else {
-
       await this.createNewSession();
     }
   }
@@ -29,331 +46,261 @@ class ModularUserBot {
   async connectWithSession() {
     try {
       const sessionString = fs.readFileSync('./session.txt', 'utf8').trim();
-      console.log('📁 Загружаем сохраненную сессию...');
+      this.logger.info('Loading saved session...');
       const stringSession = new StringSession(sessionString);
       
       this.client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
         connectionRetries: 5,
         useWSS: false,
         floodSleepThreshold: 60,
-        deviceModel: "UserBot",
-        systemVersion: "1.0",
-        appVersion: "1.0",
+        deviceModel: 'EquiDexBot',
+        systemVersion: '2.0',
+        appVersion: VERSION,
+        baseLogger: { level: 'error' }
       });
 
-      console.log('🔌 Подключаемся...');
+      this.logger.info('Connecting to Telegram...');
       await this.client.connect();
       
       const me = await this.client.getMe();
       this.botUserId = me.id;
-      console.log('✅ Авторизованы как: ' + me.firstName + ' (@' + (me.username || 'без username') + ') ID: ' + this.botUserId);
+      this.logger.info(`Connected as: ${me.firstName} (@${me.username || 'no username'}) [ID: ${this.botUserId}]`);
       
       this.ensureModulesDir();
       await this.loadAllModules();
       await this.forceLoadDialogs();
-      await this.setupUniversalHandler();
+      await this.setupHandler();
       this.startModuleWatcher();
     } catch (error) {
-      console.log('❌ Ошибка подключения по сессии:', error.message);
-      console.log('🔄 Пробуем создать новую сессию...');
+      this.logger.error('Session connection failed:', error.message);
+      this.logger.info('Creating new session...');
       await this.createNewSession();
     }
   }
 
   async createNewSession() {
     try {
-      console.log('🆕 Создаем новую сессию...');
-      
+      this.logger.info('Creating new session...');
       const stringSession = new StringSession('');
       
       this.client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
         connectionRetries: 5,
         useWSS: false,
         floodSleepThreshold: 60,
-        deviceModel: "UserBot",
-        systemVersion: "1.0",
-        appVersion: "1.0",
+        deviceModel: 'EquiDexBot',
+        systemVersion: '2.0',
+        appVersion: VERSION
       });
 
-      console.log('🔌 Запускаем клиент...');
+      this.logger.info('Starting client...');
       await this.client.start({
-        phoneNumber: async () => await input.text("📱 Введите номер телефона: "),
-        password: async () => await input.text("🔑 Введите пароль (если есть): "),
-        phoneCode: async () => await input.text("📲 Введите код из Telegram: "),
-        onError: (err) => console.log('❌ Ошибка:', err),
+        phoneNumber: async () => await input.text('📱 Phone: '),
+        password: async () => await input.text('🔑 Password: '),
+        phoneCode: async () => await input.text('📲 Code: '),
+        onError: (err) => this.logger.error('Auth error:', err),
       });
 
-      console.log('✅ Авторизация успешна!');
-      
       const sessionString = this.client.session.save();
       fs.writeFileSync('./session.txt', sessionString);
-      console.log('💾 Сессия сохранена в session.txt');
+      this.logger.info('Session saved to session.txt');
       
       const me = await this.client.getMe();
       this.botUserId = me.id;
-      console.log('👤 Авторизованы как: ' + me.firstName + ' (@' + (me.username || 'без username') + ') ID: ' + this.botUserId);
+      this.logger.info(`Authorized as: ${me.firstName} (@${me.username || 'none'}) [ID: ${this.botUserId}]`);
       
       this.ensureModulesDir();
       await this.loadAllModules();
       await this.forceLoadDialogs();
-      await this.setupUniversalHandler();
+      await this.setupHandler();
       this.startModuleWatcher();
       
     } catch (error) {
-      console.log('💥 Ошибка создания сессии:', error);
+      this.logger.error('Session creation failed:', error);
       if (fs.existsSync('./session.txt')) {
         fs.unlinkSync('./session.txt');
-        console.log('🗑️ Удален невалидный файл сессии');
+        this.logger.info('Invalid session file removed');
       }
     }
   }
 
-  isMessageFromBotOwner(msg) {
-    if (!this.botUserId) {
-      console.log('⚠️ ID бота не установлен');
-      return false;
-    }
-
+  isOwner(msg) {
+    if (!this.botUserId) return false;
     try {
-      const senderId = msg.senderId;
-      const isOwner = senderId && senderId.toString() === this.botUserId.toString();
-      
-      if (!isOwner) {
-        console.log('🚫 Игнорируем сообщение от другого пользователя ID:', senderId);
-      }
-      
-      return isOwner;
-    } catch (error) {
-      console.log('❌ Ошибка проверки отправителя:', error.message);
+      return msg.senderId?.toString() === this.botUserId.toString();
+    } catch {
       return false;
     }
+  }
+
+  checkRateLimit(senderId, maxPerMinute = 30) {
+    const now = Date.now();
+    const key = senderId?.toString();
+    if (!key) return false;
+    
+    const userLimits = this.rateLimits.get(key) || [];
+    const recent = userLimits.filter(t => now - t < 60000);
+    
+    if (recent.length >= maxPerMinute) {
+      return false;
+    }
+    
+    recent.push(now);
+    this.rateLimits.set(key, recent);
+    return true;
   }
 
   ensureModulesDir() {
     if (!fs.existsSync(this.modulesDir)) {
-      fs.mkdirSync(this.modulesDir);
-      console.log('📁 Создана папка modules/ для модулей');
+      fs.mkdirSync(this.modulesDir, { recursive: true });
+      this.logger.info('Created modules/ directory');
       this.createExampleModules();
     }
   }
 
   createExampleModules() {
-    const baseModuleCode = `class BaseModule {
+    const helpModule = `class HelpModule {
   constructor(client, bot) {
     this.client = client;
     this.bot = bot;
-    this.name = 'base';
+    this.name = 'help';
   }
 
-  getCommands() {
-    return ['секс', 'взлом', 'тест', 'статус'];
-  }
+  getCommands() { return ['help', 'помощь', ' команды']; }
 
   async handleMessage(msg, text) {
-    if (text.includes('секс')) {
-      await this.client.sendMessage(msg.chatId, {
-        message: 'Я ДЕЛАЮ ТРАХ ТРАХ 💥',
-        replyTo: msg.id
-      });
+    const cmd = text.toLowerCase().trim();
+    if (['help', 'помощь'].includes(cmd) || cmd === ' команды') {
+      await this.showHelp(msg);
       return true;
     }
-    
-    if (text.includes('взлом')) {
-      await this.startHackProcess(msg.chatId, msg);
-      return true;
-    }
-    
-    if (text.includes('тест')) {
-      await this.client.sendMessage(msg.chatId, {
-        message: '🤖 Бот работает! Модульная система активна!',
-        replyTo: msg.id
-      });
-      return true;
-    }
-
-    if (text.includes('статус')) {
-      await this.client.sendMessage(msg.chatId, {
-        message: '✅ Бот онлайн, модули загружены!',
-        replyTo: msg.id
-      });
-      return true;
-    }
-
     return false;
   }
 
-  async startHackProcess(chatId, originalMsg) {
-    try {
-      const msg = await this.client.sendMessage(chatId, {
-        message: '💻 ИНИЦИАЛИЗАЦИЯ ВЗЛОМА...\\\\n[░░░░░░░░░░] 0%',
-        replyTo: originalMsg.id
-      });
-
-      const stages = [10, 30, 50, 70, 90, 100];
-      
-      for (const percent of stages) {
-        await this.delay(1000);
-        const bars = '█'.repeat(percent/10) + '░'.repeat(10 - percent/10);
-        await msg.edit({
-          text: '💻 Взлом... [' + percent + '%] ' + bars
-        });
+  async showHelp(msg) {
+    let text = '🤖 **EquiDex UserBot**\\n\\n';
+    text += '**Available Commands:**\\n\\n';
+    
+    for (const [name, mod] of this.bot.modules) {
+      const cmds = mod.getCommands?.() || [];
+      if (cmds.length) {
+        text += '📦 **' + name + ':**\\n';
+        cmds.forEach(c => text += '  • ' + c + '\\n');
+        text += '\\n';
       }
-
-      await msg.edit({ text: '✅ Взлом завершен!' });
-
-    } catch (error) {
-      console.log('❌ Ошибка взлома:', error.message);
     }
-  }
+    
+    text += '**System:**\\n';
+    text += '• modules - list modules\\n';
+    text += '• reload [name] - reload module\\n';
+    text += '• reload all - reload all\\n';
+    text += '• stats - usage statistics';
 
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    await this.client.sendMessage(msg.chatId, { message: text, parseMode: 'markdown', replyTo: msg.id });
   }
-}
+};
 
-module.exports = BaseModule;
+module.exports = HelpModule;
 `;
 
-    const deanonModuleCode = `class DeanonModule {
+    const pingModule = `class PingModule {
   constructor(client, bot) {
     this.client = client;
     this.bot = bot;
-    this.name = 'deanon';
+    this.name = 'ping';
   }
 
-  getCommands() {
-    return ['деанон', 'инфо', 'userinfo'];
-  }
+  getCommands() { return ['ping', 'пинг']; }
 
   async handleMessage(msg, text) {
-    if (text.includes('деанон') || text.includes('инфо') || text.includes('userinfo')) {
-      await this.showUserInfo(msg);
+    if (['ping', 'пинг'].includes(text.toLowerCase().trim())) {
+      const latency = Math.round(Date.now() - this.bot.startTime);
+      const uptime = Math.floor((Date.now() - this.bot.startTime) / 1000);
+      const modules = this.bot.modules.size;
+      
+      await this.client.sendMessage(msg.chatId, {
+        message: '🏓 **Pong!**\\n\\n' +
+          '• Latency: ' + latency + 'ms\\n' +
+          '• Uptime: ' + uptime + 's\\n' +
+          '• Modules: ' + modules,
+        parseMode: 'markdown',
+        replyTo: msg.id
+      });
       return true;
     }
     return false;
   }
+};
 
-  async showUserInfo(msg) {
-    try {
-      let targetUser = msg.senderId;
-      
-      if (msg.replyTo) {
-        const repliedMsg = await this.client.getMessages(msg.chatId, { ids: msg.replyTo.replyToMsgId });
-        if (repliedMsg && repliedMsg[0]) {
-          targetUser = repliedMsg[0].senderId;
-        }
-      }
-
-      const user = await this.client.getEntity(targetUser);
-      
-      let infoText = '👤 **Информация о пользователе:**\\\\n\\\\n';
-      infoText += '**Имя:** ' + (user.firstName || 'Не указано') + '\\\\n';
-      infoText += '**Фамилия:** ' + (user.lastName || 'Не указана') + '\\\\n';
-      infoText += '**Username:** @' + (user.username || 'Не указан') + '\\\\n';
-      infoText += '**ID:** ' + user.id + '\\\\n';
-      infoText += '**Премиум:** ' + (user.premium ? '✅ Да' : '❌ Нет') + '\\\\n';
-      
-      await this.client.sendMessage(msg.chatId, {
-        message: infoText,
-        replyTo: msg.id,
-        parseMode: 'markdown'
-      });
-
-    } catch (error) {
-      await this.client.sendMessage(msg.chatId, {
-        message: '❌ Не удалось получить информацию',
-        replyTo: msg.id
-      });
-    }
-  }
-}
-
-module.exports = DeanonModule;
+module.exports = PingModule;
 `;
 
     const exampleModules = {
-      'base.js': baseModuleCode,
-      'deanon.js': deanonModuleCode
+      'help.js': helpModule,
+      'ping.js': pingModule
     };
 
     for (const [filename, content] of Object.entries(exampleModules)) {
       const filepath = path.join(this.modulesDir, filename);
       if (!fs.existsSync(filepath)) {
         fs.writeFileSync(filepath, content);
-        console.log('📄 Создан пример модуля: ' + filename);
+        this.logger.info('Created example: ' + filename);
       }
     }
   }
 
   async loadAllModules() {
-    console.log('📦 Загружаем все модули...');
+    this.logger.info('Loading modules...');
     
     if (!fs.existsSync(this.modulesDir)) {
-      console.log('❌ Папка modules не существует');
+      this.logger.warn('Modules directory not found');
       return;
     }
 
-    const files = fs.readdirSync(this.modulesDir).filter(file => 
-      file.endsWith('.js') && !file.startsWith('_')
-    );
-
-    if (files.length === 0) {
-      console.log('📁 В папке modules нет файлов модулей');
-      return;
-    }
-
-    let loadedCount = 0;
+    const files = fs.readdirSync(this.modulesDir).filter(f => f.endsWith('.js') && !f.startsWith('_'));
     
-    for (const file of files) {
+    if (files.length === 0) {
+      this.logger.warn('No module files found');
+      return;
+    }
+
+    const loadPromises = files.map(async (file) => {
       const moduleName = path.basename(file, '.js');
       
-      if (this.loadedModules.has(moduleName)) {
-        continue;
-      }
+      if (this.loadedModules.has(moduleName)) return;
 
       try {
         const modulePath = path.join(this.modulesDir, file);
-        console.log('🔄 Пробуем загрузить: ' + modulePath);
         
-        if (!fs.existsSync(modulePath)) {
-          console.log('❌ Файл не существует: ' + modulePath);
-          continue;
-        }
+        if (!fs.existsSync(modulePath)) return;
 
         delete require.cache[require.resolve(modulePath)];
-        const moduleClass = require(modulePath);
-        
-        if (typeof moduleClass !== 'function') {
-          console.log('❌ Модуль ' + moduleName + ' не экспортирует класс');
-          continue;
-        }
-        
-        const moduleInstance = new moduleClass(this.client, this);
-        
+        const ModuleClass = require(modulePath);
 
-        if (typeof moduleInstance.handleMessage !== 'function') {
-          console.log('❌ Модуль ' + moduleName + ' не имеет метода handleMessage');
-          continue;
+        if (typeof ModuleClass !== 'function') {
+          this.logger.warn(`Module ${moduleName} is not a class/function`);
+          return;
         }
-        
-        this.modules.set(moduleName, moduleInstance);
+
+        const instance = new ModuleClass(this.client, this);
+
+        if (typeof instance.handleMessage !== 'function') {
+          this.logger.warn(`Module ${moduleName} has no handleMessage`);
+          return;
+        }
+
+        this.modules.set(moduleName, instance);
         this.loadedModules.add(moduleName);
-        loadedCount++;
+        this.commandStats.set(moduleName, 0);
         
-        console.log('✅ Модуль "' + moduleName + '" загружен');
+        this.logger.info(`✓ Loaded: ${moduleName}`);
         
       } catch (error) {
-        console.log('❌ Ошибка загрузки модуля "' + moduleName + '":', error.message);
-        console.log('Stack:', error.stack);
+        this.logger.error(`Module ${moduleName} error:`, error.message);
       }
-    }
+    });
 
-    console.log('🎯 Успешно загружено модулей: ' + loadedCount);
-    
-
-    if (this.modules.size > 0) {
-      console.log('📋 Загруженные модули: ' + Array.from(this.modules.keys()).join(', '));
-    }
+    await Promise.all(loadPromises);
+    this.logger.info(`Loaded ${this.modules.size} modules`);
   }
 
   async loadSingleModule(filepath) {
@@ -361,296 +308,275 @@ module.exports = DeanonModule;
     const moduleName = path.basename(filename, '.js');
     
     if (this.loadedModules.has(moduleName)) {
-      console.log('🔄 Перезагружаем модуль "' + moduleName + '"');
       this.modules.delete(moduleName);
       this.loadedModules.delete(moduleName);
+      this.logger.info(`Reloading: ${moduleName}`);
     }
 
     try {
-      if (!fs.existsSync(filepath)) {
-        console.log('❌ Файл модуля не существует: ' + filepath);
-        return false;
-      }
-
       delete require.cache[require.resolve(filepath)];
-      const moduleClass = require(filepath);
+      const ModuleClass = require(filepath);
       
-      if (typeof moduleClass !== 'function') {
-        console.log('❌ Модуль не экспортирует класс');
-        return false;
-      }
+      if (typeof ModuleClass !== 'function') return false;
       
-      const moduleInstance = new moduleClass(this.client, this);
+      const instance = new ModuleClass(this.client, this);
       
-      if (typeof moduleInstance.handleMessage !== 'function') {
-        console.log('❌ Модуль не имеет метода handleMessage');
-        return false;
-      }
+      if (typeof instance.handleMessage !== 'function') return false;
       
-      this.modules.set(moduleName, moduleInstance);
+      this.modules.set(moduleName, instance);
       this.loadedModules.add(moduleName);
       
-      console.log('🆕 Модуль "' + moduleName + '" загружен');
+      if (!this.commandStats.has(moduleName)) {
+        this.commandStats.set(moduleName, 0);
+      }
+      
+      this.logger.info(`✓ Loaded: ${moduleName}`);
       return true;
       
     } catch (error) {
-      console.log('❌ Ошибка загрузки модуля "' + moduleName + '":', error.message);
+      this.logger.error(`Failed to load ${moduleName}:`, error.message);
       return false;
     }
   }
 
   startModuleWatcher() {
-    console.log('👀 Запускаем отслеживание новых модулей...');
+    this.logger.info('Module watcher started (10s interval)');
     
     setInterval(async () => {
       if (!fs.existsSync(this.modulesDir)) return;
       
-      const currentFiles = new Set(
-        fs.readdirSync(this.modulesDir)
-          .filter(file => file.endsWith('.js') && !file.startsWith('_'))
-          .map(file => path.basename(file, '.js'))
-      );
+      try {
+        const currentFiles = new Set(
+          fs.readdirSync(this.modulesDir)
+            .filter(f => f.endsWith('.js') && !f.startsWith('_'))
+            .map(f => path.basename(f, '.js'))
+        );
 
-      for (const moduleName of currentFiles) {
-        if (!this.loadedModules.has(moduleName)) {
-          const filepath = path.join(this.modulesDir, moduleName + '.js');
-          console.log('🆕 Обнаружен новый модуль: ' + moduleName);
-          await this.loadSingleModule(filepath);
+        for (const moduleName of currentFiles) {
+          if (!this.loadedModules.has(moduleName)) {
+            await this.loadSingleModule(path.join(this.modulesDir, moduleName + '.js'));
+          }
         }
-      }
 
-      for (const loadedModule of this.loadedModules) {
-        if (!currentFiles.has(loadedModule)) {
-          this.modules.delete(loadedModule);
-          this.loadedModules.delete(loadedModule);
-          console.log('🗑️ Модуль "' + loadedModule + '" удален');
+        for (const loaded of this.loadedModules) {
+          if (!currentFiles.has(loaded)) {
+            this.modules.delete(loaded);
+            this.loadedModules.delete(loaded);
+            this.commandStats.delete(loaded);
+            this.logger.info(`✓ Unloaded: ${loaded}`);
+          }
         }
+      } catch (error) {
+        this.logger.error('Watcher error:', error.message);
       }
     }, 10000);
   }
 
   async forceLoadDialogs() {
     try {
-      console.log('📂 Загружаем диалоги...');
       const dialogs = await this.client.getDialogs({});
-      console.log('✅ Загружено диалогов: ' + dialogs.length);
+      this.logger.info(`Loaded ${dialogs.length} dialogs`);
     } catch (error) {
-      console.log('⚠️ Ошибка загрузки диалогов:', error.message);
+      this.logger.warn('Dialog load error:', error.message);
     }
   }
 
-  async setupUniversalHandler() {
-    console.log('🐛 Настраиваем обработчик всех сообщений...');
+  async setupHandler() {
+    this.logger.info('Setting up message handler...');
     
     this.client.addEventHandler(async (event) => {
       try {
-        if (!event.message) return;
+        if (!event.message?.text) return;
         
         const msg = event.message;
-        if (!msg.text || typeof msg.text !== 'string') return;
+        const text = msg.text.toLowerCase().trim();
         
-        console.log('\n' + '='.repeat(60));
-        console.log('🕒 Время:', new Date().toLocaleTimeString());
-        console.log('📩 СООБЩЕНИЕ:', msg.text);
-        console.log('🆔 ID чата:', msg.chatId ? msg.chatId.toString() : 'unknown');
-        
-        try {
-          const chat = await msg.getChat();
-          console.log('💬 Чат:', chat.title || 'Личные (' + chat.id + ')');
-        } catch (e) {
-          console.log('💬 Чат: Не удалось получить информацию');
-        }
-
-        if (!this.isMessageFromBotOwner(msg)) {
-          console.log('🚫 Игнорируем сообщение от другого пользователя');
-          console.log('='.repeat(60));
+        if (!this.isOwner(msg)) {
           return;
         }
 
-        const text = msg.text.toLowerCase().trim();
-        console.log('🔍 Проверяем команды в модулях...');
+        if (!this.checkRateLimit(msg.senderId)) {
+          return;
+        }
 
-        let commandHandled = false;
+        let handled = false;
 
         for (const [moduleName, moduleInstance] of this.modules) {
           if (typeof moduleInstance.handleMessage === 'function') {
-            const handled = await moduleInstance.handleMessage(msg, text);
-            if (handled) {
-              console.log('🎯 Команда обработана модулем "' + moduleName + '"');
-              commandHandled = true;
-              break;
+            const startTime = Date.now();
+            try {
+              const result = await moduleInstance.handleMessage(msg, text);
+              if (result) {
+                const stats = this.commandStats.get(moduleName) || 0;
+                this.commandStats.set(moduleName, stats + 1);
+                handled = true;
+                break;
+              }
+            } catch (error) {
+              this.logger.error(`Module ${moduleName} error:`, error.message);
             }
           }
         }
 
-        if (text === 'модули' || text === 'modules') {
-          await this.showModulesList(msg.chatId, msg.id);
-          commandHandled = true;
+        if (!handled && (text === 'модули' || text === 'modules')) {
+          await this.showModules(msg);
+          handled = true;
         }
 
-        if (text.startsWith('перезагрузить модуль ')) {
-          const moduleToReload = text.replace('перезагрузить модуль ', '').trim();
-          await this.reloadModule(msg.chatId, msg.id, moduleToReload);
-          commandHandled = true;
+        if (text.startsWith('перезагрузить модуль ') || text.startsWith('reload ')) {
+          const name = text.replace(/^(перезагрузить модуль |reload )/, '').trim();
+          await this.reloadModule(msg, name);
+          handled = true;
         }
 
-        if (text === 'перезагрузить все модули') {
-          await this.reloadAllModules(msg.chatId, msg.id);
-          commandHandled = true;
+        if (text === 'перезагрузить все модули' || text === 'reload all') {
+          await this.reloadAll(msg);
+          handled = true;
         }
 
-        if (!commandHandled && (text === 'помощь' || text === 'help' || text === '/start')) {
-          if (this.modules.size === 0) {
-            await this.client.sendMessage(msg.chatId, {
-              message: '🤖 Бот запущен, но модули не загружены!',
-              replyTo: msg.id
-            });
-          } else {
-            await this.showHelp(msg.chatId, msg.id);
-          }
-          commandHandled = true;
+        if (text === 'статистика' || text === 'stats') {
+          await this.showStats(msg);
+          handled = true;
         }
 
-        console.log('='.repeat(60));
+        if (!handled && (text === 'помощь' || text === 'help' || text === '/start')) {
+          await this.showHelp(msg);
+        }
         
       } catch (error) {
-        console.log('❌ Ошибка в обработчике:', error.message);
+        this.logger.error('Handler error:', error.message);
       }
     }, new NewMessage({}));
 
-    console.log('\n✨ МОДУЛЬНЫЙ ЮЗЕРБОТ ЗАПУЩЕН!');
-    console.log('📍 Система автоматически подгружает новые модули');
-    console.log('🔒 Команды принимаются только от владельца бота (ID: ' + this.botUserId + ')');
+    this.logger.info(`${BOT_NAME} v${VERSION} ready!`);
     
-    if (this.modules.size === 0) {
-      console.log('❌ Нет загруженных модулей! Проверьте папку modules/');
-    } else {
-      console.log('💡 Напишите "помощь" для списка команд');
-      console.log('💡 Напишите "модули" для списка загруженных модулей');
+    if (this.modules.size > 0) {
+      this.logger.info(`Type "help" for commands`);
     }
 
-    await this.sendTestInstructions();
+    await this.sendStartupMessage();
   }
 
-  async showModulesList(chatId, replyToId) {
-    let modulesText = '📦 **Загруженные модули:**\n\n';
+  async showModules(msg) {
+    let text = '📦 **Modules:**\n\n';
     
-    if (this.modules.size === 0) {
-      modulesText += '❌ Нет загруженных модулей';
-    } else {
-      for (const [moduleName, moduleInstance] of this.modules) {
-        const commands = typeof moduleInstance.getCommands === 'function' 
-          ? moduleInstance.getCommands() 
-          : [];
-        modulesText += '**' + moduleName + '** - ' + commands.length + ' команд\n';
-      }
+    for (const [name, mod] of this.modules) {
+      const cmds = mod.getCommands?.() || [];
+      text += `**${name}** - ${cmds.length} commands\n`;
     }
     
-    modulesText += '\n💡 Новые модули автоматически загружаются каждые 10 секунд';
+    text += `\nTotal: ${this.modules.size} modules`;
 
-    await this.client.sendMessage(chatId, {
-      message: modulesText,
-      replyTo: replyToId,
-      parseMode: 'markdown'
-    });
+    await this.client.sendMessage(msg.chatId, { message: text, parseMode: 'markdown', replyTo: msg.id });
   }
 
-  async reloadModule(chatId, replyToId, moduleName) {
-    const filepath = path.join(this.modulesDir, moduleName + '.js');
+  async reloadModule(msg, name) {
+    const filepath = path.join(this.modulesDir, name + '.js');
     
     if (!fs.existsSync(filepath)) {
-      await this.client.sendMessage(chatId, {
-        message: '❌ Модуль "' + moduleName + '" не найден',
-        replyTo: replyToId
-      });
+      await this.client.sendMessage(msg.chatId, { message: `❌ Module "${name}" not found`, replyTo: msg.id });
       return;
     }
 
     const success = await this.loadSingleModule(filepath);
-    
-    await this.client.sendMessage(chatId, {
-      message: success 
-        ? '✅ Модуль "' + moduleName + '" перезагружен'
-        : '❌ Ошибка перезагрузки модуля "' + moduleName + '"',
-      replyTo: replyToId
+    await this.client.sendMessage(msg.chatId, { 
+      message: success ? `✅ Reloaded: ${name}` : `❌ Failed: ${name}`, 
+      replyTo: msg.id 
     });
   }
 
-  async reloadAllModules(chatId, replyToId) {
+  async reloadAll(msg) {
     this.modules.clear();
     this.loadedModules.clear();
     await this.loadAllModules();
     
-    await this.client.sendMessage(chatId, {
-      message: '✅ Все модули перезагружены (' + this.modules.size + ' модулей)',
-      replyTo: replyToId
+    await this.client.sendMessage(msg.chatId, { 
+      message: `✅ Reloaded ${this.modules.size} modules`, 
+      replyTo: msg.id 
     });
   }
 
-  async showHelp(chatId, replyToId) {
-    let helpText = '🤖 **Модульный UserBot**\n\n';
-    helpText += '**Доступные команды:**\n\n';
+  async showStats(msg) {
+    let text = '📊 **Statistics:**\n\n';
+    
+    const sorted = [...this.commandStats.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [name, count] of sorted) {
+      text += `• ${name}: ${count}\n`;
+    }
+    
+    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    const hours = Math.floor(uptime / 3600);
+    const mins = Math.floor((uptime % 3600) / 60);
+    
+    text += `\n⏱ Uptime: ${hours}h ${mins}m`;
+    text += `\n📦 Modules: ${this.modules.size}`;
+
+    await this.client.sendMessage(msg.chatId, { message: text, parseMode: 'markdown', replyTo: msg.id });
+  }
+
+  async showHelp(msg) {
+    let text = `🤖 **${BOT_NAME}** v${VERSION}\n\n`;
+    text += '**Commands:**\n\n';
 
     for (const [moduleName, moduleInstance] of this.modules) {
-      if (typeof moduleInstance.getCommands === 'function') {
-        const commands = moduleInstance.getCommands();
-        if (commands.length > 0) {
-          helpText += '📦 **' + moduleName + ':**\n';
-          commands.forEach(cmd => {
-            helpText += '   • ' + cmd + '\n';
-          });
-          helpText += '\n';
-        }
+      const commands = moduleInstance.getCommands?.() || [];
+      if (commands.length > 0) {
+        text += `📦 **${moduleName}:**\n`;
+        commands.forEach(cmd => text += `  • ${cmd}\n`);
+        text += '\n';
       }
     }
 
-    helpText += '**Управление модулями:**\n';
-    helpText += '• модули - список модулей\n';
-    helpText += '• перезагрузить модуль [имя] - перезагрузить модуль\n';
-    helpText += '• перезагрузить все модули - перезагрузить все\n\n';
-    helpText += '💡 Новые модули автоматически загружаются!';
+    text += '**System:**\n';
+    text += '• modules - module list\n';
+    text += '• reload [name] - reload module\n';
+    text += '• reload all - reload all\n';
+    text += '• stats - usage statistics';
 
-    await this.client.sendMessage(chatId, {
-      message: helpText,
-      replyTo: replyToId,
-      parseMode: 'markdown'
-    });
+    await this.client.sendMessage(msg.chatId, { message: text, parseMode: 'markdown', replyTo: msg.id });
   }
 
-  async sendTestInstructions() {
+  async sendStartupMessage() {
     try {
-      await this.client.sendMessage('me', {
-        message: `🤖 Модульный UserBot запущен!
-
-🎯 Особенности:
-• Автоподгрузка новых модулей
-• Горячая перезагрузка
-• Динамическое управление
-• 🔒 Команды принимаются только от вас
-
-Команды:
-• помощь - список команд
-• модули - список модулей
-• перезагрузить модуль [имя] - перезагрузить модуль
-
-Просто добавьте .js файл в папку modules/!`
-      });
+      const uptime = Math.floor((Date.now() - this.startTime) / 1000);
       
-      console.log('✅ Инструкции отправлены');
+      await this.client.sendMessage('me', {
+        message: `🤖 **${BOT_NAME}** v${VERSION} started!\n\n` +
+          `📦 Modules: ${this.modules.size}\n` +
+          `⏱ Ready in: ${uptime}s\n\n` +
+          `Type "help" for commands`
+      });
     } catch (error) {
-      console.log('⚠️ Не удалось отправить инструкции');
+      this.logger.warn('Startup message failed');
     }
+  }
+
+  async shutdown(signal) {
+    this.logger.info('Graceful shutdown...');
+    
+    for (const timer of this.timers?.values() || []) {
+      clearInterval(timer);
+    }
+    
+    if (this.client) {
+      await this.client.disconnect();
+    }
+    
+    this.logger.info('Shutdown complete');
+    process.exit(0);
   }
 }
 
 async function main() {
-  try {
-    console.log('🤖 Запуск модульного UserBot с авто-подгрузкой...');
-    const bot = new ModularUserBot();
-    await bot.initialize();
-  } catch (error) {
-    console.error('💥 Фатальная ошибка:', error);
-  }
+  const bot = new EquiDexBot();
+  
+  process.on('SIGINT', () => bot.shutdown('SIGINT'));
+  process.on('SIGTERM', () => bot.shutdown('SIGTERM'));
+  
+  await bot.initialize();
 }
 
-main();
+main().catch(error => {
+  console.error('Fatal error:', error);
+  process.exit(1);
+});

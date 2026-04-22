@@ -6,86 +6,57 @@ class BaseModule {
   }
 
   getCommands() {
-    return ['секс', 'взлом', 'тест', 'статус'];
+    return ['тест', 'статус', 'айди', 'info'];
   }
 
   async handleMessage(msg, text) {
-    if (text.includes('секс')) {
-      console.log('🎯 ТРИГГЕР "СЕКС" СРАБОТАЛ!');
-      await this.client.sendMessage(msg.chatId, {
-        message: 'Я ДЕЛАЮ ТРАХ ТРАХ 💥',
-        replyTo: msg.id
-      });
-      return true;
-    }
-    
-    if (text.includes('взлом')) {
-      console.log('🎯 ТРИГГЕР "ВЗЛОМ" СРАБОТАЛ!');
-      await this.startHackProcess(msg.chatId, msg);
-      return true;
-    }
-    
     if (text.includes('тест')) {
-      console.log('🎯 ТРИГГЕР "ТЕСТ" СРАБОТАЛ!');
       await this.client.sendMessage(msg.chatId, {
-        message: '🤖 Бот работает! Модульная система активна!',
+        message: '✅ EquiDex UserBot работает!\nМодульная система активна.',
         replyTo: msg.id
       });
       return true;
     }
 
     if (text.includes('статус')) {
-      console.log('🎯 ТРИГГЕР "СТАТУС" СРАБОТАЛ!');
+      const modules = this.bot.modules.size;
       await this.client.sendMessage(msg.chatId, {
-        message: '✅ Бот онлайн, модули загружены!',
+        message: `✅ Бот онлайн!\n📦 Модулей: ${modules}`,
         replyTo: msg.id
       });
+      return true;
+    }
+
+    if (text.includes('айди') || text === 'info') {
+      await this.showUserInfo(msg);
       return true;
     }
 
     return false;
   }
 
-  async startHackProcess(chatId, originalMsg) {
+  async showUserInfo(msg) {
     try {
-      console.log('🚀 Запускаю процесс взлома...');
-      
-      const msg = await this.client.sendMessage(chatId, {
-        message: '💻 ИНИЦИАЛИЗАЦИЯ ВЗЛОМА...\n[░░░░░░░░░░] 0%',
-        replyTo: originalMsg.id
+      const me = await this.client.getMe();
+      const user = await this.client.getEntity(msg.senderId);
+
+      let info = '👤 **Информация**\n\n';
+      info += `**Имя:** ${user.firstName || 'N/A'}\n`;
+      if (user.lastName) info += `**Фамилия:** ${user.lastName}\n`;
+      info += `**Username:** @${user.username || 'нет'}\n`;
+      info += `**ID:** ${user.id}`;
+
+      await this.client.sendMessage(msg.chatId, {
+        message: info,
+        parseMode: 'markdown',
+        replyTo: msg.id
       });
-
-      const stages = [
-        {percent: 15, text: "📡 Подключение к цели..."},
-        {percent: 30, text: "🔍 Сканирование портов..."},
-        {percent: 45, text: "🛡️ Обход защиты..."},
-        {percent: 60, text: "💾 Взлом базы данных..."},
-        {percent: 75, text: "🔓 Дешифровка..."},
-        {percent: 90, text: "📊 Извлечение данных..."},
-        {percent: 100, text: "✅ ВЗЛОМ ЗАВЕРШЕН!"}
-      ];
-
-      for (const step of stages) {
-        await this.delay(1200);
-        const bars = Math.floor(step.percent / 10);
-        const progressBar = '█'.repeat(bars) + '░'.repeat(10 - bars);
-        
-        await msg.edit({
-          text: `💻 СИСТЕМНЫЙ ВЗЛОМ\n[${progressBar}] ${step.percent}%\n${step.text}`
-        });
-        
-        console.log(`🖥️ Прогресс взлома: ${step.percent}%`);
-      }
-
-      console.log('🎉 Взлом завершен!');
-
     } catch (error) {
-      console.log('❌ Ошибка взлома:', error.message);
+      await this.client.sendMessage(msg.chatId, {
+        message: '❌ Ошибка получения данных',
+        replyTo: msg.id
+      });
     }
-  }
-
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 

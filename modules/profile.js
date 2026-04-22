@@ -3,119 +3,86 @@ class ProfileModule {
     this.client = client;
     this.bot = bot;
     this.name = 'profile';
-    this.userStats = {
-      messagesSent: 0,
-      commandsUsed: 0
-    };
+    this.startTime = Date.now();
   }
 
-  getCommands() {
-    return ['профиль', 'profile', 'кто я', 'юзер', 'user', 'мой профиль', 'стата'];
-  }
+  getCommands() { return ['профиль', 'profile', 'me']; }
 
   async handleMessage(msg, text) {
-    const command = text.toLowerCase();
-    if (this.getCommands().includes(command)) {
-      console.log('🎯 ТРИГГЕР "ПРОФИЛЬ" СРАБОТАЛ!');
-      this.userStats.commandsUsed++;
+    const cmd = text.toLowerCase().trim();
+    if (['профиль', 'profile', 'me'].includes(cmd)) {
       await this.showProfile(msg);
       return true;
     }
-
-    this.userStats.messagesSent++;
-
     return false;
+  }
+
+  formatDate(date) {
+    return date.toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
   }
 
   async showProfile(msg) {
     try {
-      const user = await this.client.getEntity('me');
-      const totalModules = this.bot.modules.size;
-      
-      const rank = this.determineRank(user);
-      
-      const profileText = this.formatProfile(user, rank, totalModules);
-      
+      const me = await this.client.getMe();
+      const uptime = Math.floor((Date.now() - this.bot.startTime) / 1000);
+      const hours = Math.floor(uptime / 3600);
+      const mins = Math.floor((uptime % 3600) / 60);
+
+      const rank = me.id.toString() === '694936338' ? '👑 Разработчик' : '👤 Пользователь';
+
+      const name = [me.first_name, me.last_name].filter(Boolean).join(' ') || 'Не указано';
+      const lang = this.getLanguageName(me.language_code);
+
+      const profileText = [
+        '╔════════════════════════════════╗',
+        '║     👤 EQUIDEX PROFILE        ║',
+        '╠════════════════════════════════╣',
+        '',
+        `  🏷 Имя: ${name}`,
+        `  👤 Username: @${me.username || 'скрыт'}`,
+        `  🆔 ID: ${me.id}`,
+        '',
+        `  🌐 Язык: ${lang}`,
+        '',
+        `  ⏱ Время работы: ${hours}ч ${mins}м`,
+        '',
+        `  📦 Модули: ${this.bot.modules.size}`,
+        '',
+        '╠════════════════════════════════╣',
+        '',
+        `  ${rank}`,
+        '',
+        '╚════════════════════════════════╝'
+      ].join('\n');
+
       await this.client.sendMessage(msg.chatId, {
         message: profileText,
-        replyTo: msg.id,
-        parseMode: 'markdown'
-      });
-
-      console.log('✅ Профиль показан');
-
-    } catch (error) {
-      console.log('❌ Ошибка показа профиля:', error.message);
-      await this.client.sendMessage(msg.chatId, {
-        message: '❌ Не удалось загрузить профиль',
+        parseMode: 'none',
         replyTo: msg.id
       });
+
+    } catch (error) {
+      console.log('Profile error:', error.message);
+      await this.client.sendMessage(msg.chatId, {
+        message: '❌ Ошибка получения профиля'
+      });
     }
   }
 
-  determineRank(user) {
-    if (user.username && user.username.includes('admin')) {
-      return 'Administrator';
-    } else if (user.premium) {
-      return 'Premium User';
-    } else if (user.bot) {
-      return 'Bot';
-    } else {
-      return 'Developer';
-    }
-  }
-
-  formatProfile(user, rank, totalModules) {
-    const nickname = user.firstName || 'Не установлен';
-    const username = user.username ? `@${user.username}` : 'Не установлен';
-    const lastName = user.lastName ? ` ${user.lastName}` : '';
-    
-    return `👤 **ZakatUserBot v1.5** (${this.getUserType(user)})
-
-📛 **Никнейм:** ${nickname}${lastName}
-🔗 **Юзернейм:** ${username}
-⭐ **Ранг в юзерботе:** ${rank}
-📦 **Личных модулей:** ${totalModules}
-🆔 **ID:** ${user.id}
-📊 **Статистика:** ${this.userStats.commandsUsed} команд, ${this.userStats.messagesSent} сообщ.
-${user.premium ? '💎 **Премиум:** ✅ Да' : ''}
-${this.getStatusEmoji()} **Статус:** ${this.getUserStatus()}
-
-${this.getAdditionalInfo()}`;
-  }
-
-  getUserType(user) {
-    if (user.bot) return 'Бот';
-    if (user.deleted) return 'Удаленный';
-    if (user.verified) return 'Верифицированный';
-    if (user.premium) return 'Премиум';
-    return 'Пользователь';
-  }
-
-  getUserStatus() {
-    const statuses = ['🟢 Онлайн', '🟡 Недавно', '🔴 Офлайн'];
-    return statuses[Math.floor(Math.random() * statuses.length)];
-  }
-
-  getStatusEmoji() {
-    return '🟢';
-  }
-
-  getAdditionalInfo() {
-    const info = [];
-    
-    info.push(`🔧 **Версия юзербота:** 1.5.0`);
-    info.push(`🕒 **Время работы:** ${this.getUptime()}`);
-    info.push(`📁 **Папка модулей:** modules/`);
-    info.push(`🎯 **Активных команд:** ${this.getCommands().length}`);
-    
-    return info.join('\n');
-  }
-
-  getUptime() {
-    const hours = Math.floor(process.uptime() / 3600);
-    const minutes = Math.floor((process.uptime() % 3600) / 60);
-    return `${hours}ч ${minutes}м`;
+  getLanguageName(code) {
+    const languages = {
+      'ru': 'Русский 🇷🇺',
+      'en': 'Английский 🇬🇧',
+      'uk': 'Украинский 🇺🇦',
+      'be': 'Белорусский 🇧🇾',
+      'kk': 'Казахский 🇰🇿',
+      'uz': 'Узбекский 🇺🇿'
+    };
+    return languages[code] || `Unknown (${code})`;
   }
 }
 
