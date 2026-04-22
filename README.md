@@ -15,7 +15,7 @@
 ```bash
 # Клонировать репозиторий
 git clone https://github.com/ZakatCloud/EquiDexUB-Public
-cd equidex-userbot
+cd EquiDexUB-Public
 
 # Установить зависимости
 npm install
