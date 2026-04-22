@@ -14,7 +14,7 @@
 
 ```bash
 # Клонировать репозиторий
-git clone [https://github.com/your-repo/equidex-userbot.git](https://github.com/ZakatCloud/EquiDexUB-Public)
+git clone https://github.com/ZakatCloud/EquiDexUB-Public
 cd equidex-userbot
 
 # Установить зависимости
